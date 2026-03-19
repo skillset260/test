@@ -1,0 +1,475 @@
+const logger = require("../../../../config/logger");
+const httpStatus = require("http-status");
+const ApiError = require("../../../../utilities/apiErrorUtils");
+const reviewFeatureService = require("./service.revieweFeature");
+const subCategoryService = require("../subcategory/service.subcategory");
+const categoryService = require("../category/service.category");
+const { searchKeys } = require("./schema.revieweFeature");
+const { errorRes } = require("../../../../utilities/resError");
+const {
+  getSearchQuery,
+  checkInvalidParams,
+  getRangeQuery,
+  getFilterQuery,
+  getDateFilterQuery,
+  getLimitAndTotalCount,
+  getOrderByAndItsValue,
+} = require("../../helper/paginationFilterHelper");
+const { default: mongoose } = require("mongoose");
+const { userEnum } = require("../../../utils/enumUtils");
+
+//add start
+exports.add = async (req, res) => {
+  try {
+    let { categoryId, subCategoryId, features } = req.body;
+
+    /**
+     * check category exist
+     */
+    let categoryExist = await categoryService.getOneByMultiField({
+      _id: new mongoose.Types.ObjectId(categoryId),
+    });
+    if (!categoryExist) {
+      throw new ApiError(httpStatus.OK, "Please select valid category.");
+    }
+
+    /**
+     * check sub category exist
+     */
+    let subCategoryExist = await subCategoryService.getOneByMultiField({
+      _id: new mongoose.Types.ObjectId(subCategoryId),
+      categoryId: categoryId,
+    });
+    if (!subCategoryExist) {
+      throw new ApiError(httpStatus.OK, "Please select valid sub category.");
+    }
+
+    //------------------create data-------------------
+    // remove duplicate features from request (important)
+    let uniqueFeatures = [...new Set(features.map((f) => f.trim()))];
+
+    // fetch already existing features (single DB call)
+    let existingFeatures = await reviewFeatureService.findAllWithQuery({
+      categoryId,
+      subCategoryId,
+    });
+
+    let existingSet = new Set(existingFeatures.map((f) => f.featureName));
+
+    // filter new features only
+    let insertData = uniqueFeatures
+      .filter((f) => !existingSet.has(f))
+      .map((f) => ({
+        categoryId,
+        categoryName: categoryExist.categoryName,
+        subCategoryId,
+        subCategoryName: subCategoryExist.subCategoryName,
+        featureName: f,
+      }));
+
+    if (!insertData.length) {
+      throw new ApiError(httpStatus.OK, "All features already exist.");
+    }
+
+    // bulk insert
+    let dataCreated = await reviewFeatureService.createMany(insertData);
+
+    if (dataCreated.length) {
+      return res.status(httpStatus.CREATED).send({
+        message: "Added successfully.",
+        data: dataCreated,
+        status: true,
+        code: "OK",
+        issue: null,
+      });
+    } else {
+      throw new ApiError(httpStatus.NOT_IMPLEMENTED, `Something went wrong.`);
+    }
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+//update start
+exports.update = async (req, res) => {
+  try {
+    let { categoryId, subCategoryId, featureName } = req.body;
+    let idToBeSearch = req.params.id;
+
+    //------------------Find data-------------------
+    let datafound = await reviewFeatureService.getOneByMultiField({
+      _id: idToBeSearch,
+    });
+    if (!datafound) {
+      throw new ApiError(httpStatus.OK, `Review Feature not found.`);
+    }
+
+    /**
+     * check duplicate exist
+     */
+    let dataExist = await reviewFeatureService.getOneByMultiField({
+      _id: { $ne: new mongoose.Types.ObjectId(idToBeSearch) },
+      categoryId: categoryId,
+      subCategoryId: subCategoryId,
+      featureName: featureName,
+    });
+    if (dataExist) {
+      throw new ApiError(httpStatus.OK, "Review Feature already exist.");
+    }
+
+    /**
+     * check category exist
+     */
+    let categoryExist = await categoryService.getOneByMultiField({
+      _id: new mongoose.Types.ObjectId(categoryId),
+    });
+    if (!categoryExist) {
+      throw new ApiError(httpStatus.OK, "Please select valid category.");
+    }
+    req.body.categoryName = categoryExist.categoryName;
+
+    /**
+     * check sub category exist
+     */
+    let subCategoryExist = await subCategoryService.getOneByMultiField({
+      _id: new mongoose.Types.ObjectId(subCategoryId),
+      categoryId: categoryId,
+    });
+    if (!subCategoryExist) {
+      throw new ApiError(httpStatus.OK, "Please select valid sub category.");
+    }
+    req.body.subCategoryName = subCategoryExist.subCategoryName;
+
+    let dataUpdated = await reviewFeatureService.getOneAndUpdate(
+      {
+        _id: idToBeSearch,
+        isDeleted: false,
+      },
+      {
+        $set: {
+          ...req.body,
+        },
+      },
+    );
+
+    if (dataUpdated) {
+      return res.status(httpStatus.CREATED).send({
+        message: "Updated successfully.",
+        data: dataUpdated,
+        status: true,
+        code: "OK",
+        issue: null,
+      });
+    } else {
+      throw new ApiError(httpStatus.NOT_IMPLEMENTED, `Something went wrong.`);
+    }
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+// all filter pagination api
+exports.allFilterPagination = async (req, res) => {
+  try {
+    var dateFilter = req.body.dateFilter;
+    let searchValue = req.body.searchValue;
+    let searchIn = req.body.params;
+    let filterBy = req.body.filterBy;
+    let rangeFilterBy = req.body.rangeFilterBy;
+    let isPaginationRequired = req.body.isPaginationRequired
+      ? req.body.isPaginationRequired
+      : true;
+    let finalAggregateQuery = [];
+    let matchQuery = {
+      $and: [{ isDeleted: false }],
+    };
+
+    if (req.userData.userType !== userEnum.superAdmin) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        "You don't have permission to access this.",
+      );
+    }
+
+    let { orderBy, orderByValue } = getOrderByAndItsValue(
+      req.body.orderBy,
+      req.body.orderByValue,
+    );
+
+    //----------------------------
+
+    /**
+     * check search keys valid
+     **/
+
+    let searchQueryCheck = checkInvalidParams(searchIn, searchKeys);
+
+    if (searchQueryCheck && !searchQueryCheck.status) {
+      return res.status(httpStatus.OK).send({
+        ...searchQueryCheck,
+      });
+    }
+    /**
+     * get searchQuery
+     */
+    const searchQuery = getSearchQuery(searchIn, searchKeys, searchValue);
+    if (searchQuery && searchQuery.length) {
+      matchQuery.$and.push({ $or: searchQuery });
+    }
+    //----------------------------
+    /**
+     * get range filter query
+     */
+    const rangeQuery = getRangeQuery(rangeFilterBy);
+    if (rangeQuery && rangeQuery.length) {
+      matchQuery.$and.push(...rangeQuery);
+    }
+
+    //----------------------------
+    /**
+     * get filter query
+     */
+    let booleanFields = [];
+    let numberFileds = [];
+    let objectIdFields = [];
+    let withoutRegexFields = [];
+
+    const filterQuery = getFilterQuery(
+      filterBy,
+      booleanFields,
+      numberFileds,
+      objectIdFields,
+      withoutRegexFields,
+    );
+
+    if (filterQuery && filterQuery.length) {
+      matchQuery.$and.push(...filterQuery);
+    }
+    //----------------------------
+    //calander filter
+    /**
+     * ToDo : for date filter
+     */
+
+    let allowedDateFiletrKeys = ["createdAt", "updatedAt"];
+
+    const datefilterQuery = await getDateFilterQuery(
+      dateFilter,
+      allowedDateFiletrKeys,
+    );
+    if (datefilterQuery && datefilterQuery.length) {
+      matchQuery.$and.push(...datefilterQuery);
+    }
+
+    //calander filter
+    //----------------------------
+
+    /**
+     * for lookups , project , addfields or group in aggregate pipeline form dynamic quer in additionalQuery array
+     */
+    let additionalQuery = [];
+
+    if (additionalQuery.length) {
+      finalAggregateQuery.push(...additionalQuery);
+    }
+
+    finalAggregateQuery.push({
+      $match: matchQuery,
+    });
+
+    //-----------------------------------
+    let dataFound =
+      await reviewFeatureService.aggregateQuery(finalAggregateQuery);
+    if (dataFound.length === 0) {
+      throw new ApiError(httpStatus.OK, `No data Found`);
+    }
+
+    let { limit, page, totalData, skip, totalpages } =
+      await getLimitAndTotalCount(
+        req.body.limit,
+        req.body.page,
+        dataFound.length,
+        req.body.isPaginationRequired,
+      );
+
+    finalAggregateQuery.push({ $sort: { [orderBy]: parseInt(orderByValue) } });
+    if (isPaginationRequired) {
+      finalAggregateQuery.push({ $skip: skip });
+      finalAggregateQuery.push({ $limit: limit });
+    }
+
+    let result = await reviewFeatureService.aggregateQuery(finalAggregateQuery);
+    if (result.length) {
+      return res.status(200).send({
+        data: result,
+        totalPage: totalpages,
+        status: true,
+        currentPage: page,
+        totalItem: totalData,
+        pageSize: limit,
+        message: "Data Found",
+      });
+    } else {
+      throw new ApiError(httpStatus.OK, `No data Found`);
+    }
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+//get api
+exports.get = async (req, res) => {
+  try {
+    let additionalQuery = [{ $match: { isDeleted: false, isActive: true } }];
+
+    if (req.userData.userType !== userEnum.superAdmin) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        "You don't have permission to access this.",
+      );
+    }
+
+    let dataExist = await reviewFeatureService.aggregateQuery(additionalQuery);
+
+    if (!dataExist || !dataExist.length) {
+      throw new ApiError(httpStatus.OK, "Data not found.");
+    } else {
+      return res.status(httpStatus.OK).send({
+        message: "Successfull.",
+        status: true,
+        data: dataExist,
+        code: "OK",
+        issue: null,
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+//get by id
+exports.getById = async (req, res) => {
+  try {
+    let idToBeSearch = req.params.id;
+
+    let additionalQuery = [
+      {
+        $match: {
+          _id: new mongoose.Types.ObjectId(idToBeSearch),
+          isDeleted: false,
+        },
+      },
+    ];
+
+    let dataExist = await reviewFeatureService.aggregateQuery(additionalQuery);
+
+    if (!dataExist) {
+      throw new ApiError(httpStatus.OK, "Data not found.");
+    } else {
+      return res.status(httpStatus.OK).send({
+        message: "Successfull.",
+        status: true,
+        data: dataExist[0],
+        code: "OK",
+        issue: null,
+      });
+    }
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+//delete api
+exports.deleteDocument = async (req, res) => {
+  try {
+    let _id = req.params.id;
+    if (!(await reviewFeatureService.getOneByMultiField({ _id }))) {
+      throw new ApiError(httpStatus.OK, "Data not found.");
+    }
+
+    let deleted = await reviewFeatureService.getOneAndDelete({ _id });
+    if (!deleted) {
+      throw new ApiError(httpStatus.OK, "Some thing went wrong.");
+    }
+    return res.status(httpStatus.OK).send({
+      message: "Successfull!",
+      status: true,
+      data: null,
+      code: "OK",
+      issue: null,
+    });
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
+
+//statusChange
+exports.statusChange = async (req, res) => {
+  try {
+    let _id = req.params.id;
+    let dataExist = await reviewFeatureService.getOneByMultiField({ _id });
+    if (!dataExist) {
+      throw new ApiError(httpStatus.OK, "Data not found.");
+    }
+    let isActive = dataExist.isActive ? false : true;
+
+    let statusChanged = await reviewFeatureService.getOneAndUpdate(
+      { _id },
+      { isActive },
+    );
+    if (!statusChanged) {
+      throw new ApiError(httpStatus.OK, "Some thing went wrong.");
+    }
+    return res.status(httpStatus.OK).send({
+      message: "Successfull.",
+      status: true,
+      data: statusChanged,
+      code: "OK",
+      issue: null,
+    });
+  } catch (err) {
+    console.log(err);
+    let errData = errorRes(err);
+    logger.info(errData.resData);
+    let { message, status, data, code, issue } = errData.resData;
+    return res
+      .status(errData.statusCode)
+      .send({ message, status, data, code, issue });
+  }
+};
