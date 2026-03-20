@@ -12,6 +12,9 @@ const reviewFeatureOptionRoute = require("./src/reviewFeatureOption/route.review
 const seoKeywordRoute = require("./src/seoKeyword/route.seoKeyword");
 const profileRoute = require("./src/profile/route.profile");
 const reviewTemplateRoute = require("./src/reviewTemplate/route.reviewTemplate");
+const subscriptionPlanRoute = require("./src/subscriptionPlan/route.subscriptionPlan");
+const customerSubscriptionRoute = require("./src/customerSubcription/route.customerSubcription");
+const transactionRoute = require("../v1/src/transaction/route.transaction");
 
 const devRoutes = [
   // routes available only in development mode
@@ -60,6 +63,10 @@ const defaultRoutes = [
   {
     path: "/customer-subscription",
     route: customerSubscriptionRoute,
+  },
+  {
+    path: "/transaction",
+    route: transactionRoute,
   },
 ];
 
