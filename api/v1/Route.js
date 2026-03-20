@@ -53,6 +53,14 @@ const defaultRoutes = [
     path: "/review-template",
     route: reviewTemplateRoute,
   },
+  {
+    path: "/subscription-plan",
+    route: subscriptionPlanRoute,
+  },
+  {
+    path: "/customer-subscription",
+    route: customerSubscriptionRoute,
+  },
 ];
 
 defaultRoutes.forEach((route) => {
