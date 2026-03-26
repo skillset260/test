@@ -3,6 +3,22 @@ const { ObjectId } = require("mongodb");
 
 const reviewFeatureOptionSchema = new mongoose.Schema(
   {
+    categoryId: {
+      type: ObjectId,
+      required: true,
+    },
+    categoryName: {
+      type: String,
+      required: true,
+    },
+    subCategoryId: {
+      type: ObjectId,
+      required: true,
+    },
+    subCategoryName: {
+      type: String,
+      required: true,
+    },
     reviewFeatureId: {
       type: ObjectId,
       required: true,

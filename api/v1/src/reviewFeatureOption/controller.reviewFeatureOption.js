@@ -49,6 +49,10 @@ exports.add = async (req, res) => {
         insertData.push({
           reviewFeatureId,
           reviewFeatureName: reviewFeatureExist.featureName,
+          categoryId: reviewFeatureExist.categoryId,
+          categoryName: reviewFeatureExist.categoryName,
+          subCategoryId: reviewFeatureExist.subCategoryId,
+          subCategoryName: reviewFeatureExist.subCategoryName,
           featureOption,
           language,
         });
@@ -121,6 +125,10 @@ exports.update = async (req, res) => {
       throw new ApiError(httpStatus.OK, "Please select valid review feature.");
     }
     req.body.reviewFeatureName = reviewFeatureExist.featureName;
+    req.body.categoryId = reviewFeatureExist.categoryId;
+    req.body.categoryName = reviewFeatureExist.categoryName;
+    req.body.subCategoryId = reviewFeatureExist.subCategoryId;
+    req.body.subCategoryName = reviewFeatureExist.subCategoryName;
 
     let dataUpdated = await reviewFeatureOptionService.getOneAndUpdate(
       {
@@ -316,13 +324,6 @@ exports.allFilterPagination = async (req, res) => {
 exports.get = async (req, res) => {
   try {
     let additionalQuery = [{ $match: { isDeleted: false, isActive: true } }];
-
-    if (req.userData.userType !== userEnum.superAdmin) {
-      throw new ApiError(
-        httpStatus.FORBIDDEN,
-        "You don't have permission to access this.",
-      );
-    }
 
     let dataExist =
       await reviewFeatureOptionService.aggregateQuery(additionalQuery);
